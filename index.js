@@ -75,8 +75,10 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 	
 	//Definition of the service points
 	var soap = require('soap');
-	var urlWE = 'http://spa-andress/My_UniCredit/WebServices/WorkflowEngineSOA.asmx?wsdl';
-	var urlEM = 'http://spa-andress/My_UniCredit/WebServices/EntityManagerSOA.asmx?wsdl';
+	var ServerName = '10.10.10.10';
+	var ProjectName = 'PROJECT_NAME';
+	var urlWE = 'http://' + ServerName + '/' + ProjectName + '/WebServices/WorkflowEngineSOA.asmx?wsdl';
+	var urlEM = 'http://' + ServerName + '/' + ProjectName + '/WebServices/EntityManagerSOA.asmx?wsdl';
 	
 	//variable to identify of the current chunk should be ended because a empty row was found
 	var empty = false;
@@ -92,69 +94,41 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 		while(!empty && InitRow <= FinRow) //  && InitRow < 1023
 		{		
 			//Definition of a variable per each column of the sheet
-			STATUS = worksheet['A' + InitRow];
-			Opu = worksheet['B' + InitRow];
-			CNP = worksheet['C' + InitRow];
-			CORE_ID = worksheet['D' + InitRow];
-			CLIENT_NAME = worksheet['E' + InitRow];
-			EMAIL = worksheet['F' + InitRow];
-			CLIENT_TYPE = worksheet['G' + InitRow];
-			CONSENT_TYPE = worksheet['H' + InitRow];
-			CONSENT_VALUE = worksheet['I' + InitRow];
-			CONSENT_DATE = worksheet['J' + InitRow];
-			CONSENT_END_DATE = worksheet['K' + InitRow];
-			CHANNEL = worksheet['L' + InitRow];
+			ATTRIBUTE_1 = worksheet['A' + InitRow];
+			ATTRIBUTE_2 = worksheet['B' + InitRow];
+			ATTRIBUTE_3 = worksheet['C' + InitRow];
+			ATTRIBUTE_4 = worksheet['I' + InitRow];
 			
 			//Variable to read if at least one of the cells of the sheet had a variable
 			var foundOne = false;
 			log.info('Reading Row: '+InitRow);
 			
 			//For each of the variable we need to verify if at least one has value
-			if(STATUS != undefined && STATUS.v != null && STATUS.v != '') {log.debug('STATUS '+STATUS.v);foundOne = true;}
-			if(Opu != undefined && Opu.v != null && Opu.v != '') {log.debug('Opu '+Opu.v);foundOne = true;}
-			if(CNP != undefined && CNP.v != null && CNP.v != '') {log.debug('CNP '+CNP.v);foundOne = true;}
-			if(CORE_ID != undefined && CORE_ID.v != null && CORE_ID.v != '') {log.debug('CORE_ID '+CORE_ID.v);foundOne = true;}
-			if(CLIENT_NAME != undefined && CLIENT_NAME.v != null && CLIENT_NAME.v != '') {log.debug('CLIENT_NAME '+CLIENT_NAME.v);foundOne = true;}
-			if(EMAIL != undefined && EMAIL.v != null && EMAIL.v != '') {log.debug('EMAIL '+EMAIL.v);foundOne = true;}
-			if(CLIENT_TYPE != undefined && CLIENT_TYPE.v != null && CLIENT_TYPE.v != '') {log.debug('CLIENT_TYPE '+CLIENT_TYPE.v);foundOne = true;}
-			if(CONSENT_TYPE != undefined && CONSENT_TYPE.v != null && CONSENT_TYPE.v != '') {log.debug('CONSENT_TYPE '+CONSENT_TYPE.v);foundOne = true;}
-			if(CONSENT_VALUE != undefined && CONSENT_VALUE.v != null && CONSENT_VALUE.v != '') {log.debug('CONSENT_VALUE '+CONSENT_VALUE.v);foundOne = true;}
-			if(CONSENT_DATE != undefined && CONSENT_DATE.v != null && CONSENT_DATE.v != '') {log.debug('CONSENT_DATE '+CONSENT_DATE.v);foundOne = true;}
-			if(CONSENT_END_DATE != undefined && CONSENT_END_DATE.v != null && CONSENT_END_DATE.v != '') {log.debug('CONSENT_END_DATE '+CONSENT_END_DATE.v);foundOne = true;}
-			if(CHANNEL != undefined && CHANNEL.v != null && CHANNEL.v != '') {log.debug('CHANNEL '+CHANNEL.v);foundOne = true;}
+			if(ATTRIBUTE_1 != undefined && ATTRIBUTE_1.v != null && ATTRIBUTE_1.v != '') {log.debug('ATTRIBUTE_1 '+ATTRIBUTE_1.v);foundOne = true;}
+			if(ATTRIBUTE_2 != undefined && ATTRIBUTE_2.v != null && ATTRIBUTE_2.v != '') {log.debug('ATTRIBUTE_2 '+ATTRIBUTE_2.v);foundOne = true;}
+			if(ATTRIBUTE_3 != undefined && ATTRIBUTE_3.v != null && ATTRIBUTE_3.v != '') {log.debug('ATTRIBUTE_3 '+ATTRIBUTE_3.v);foundOne = true;}
+			if(ATTRIBUTE_4 != undefined && ATTRIBUTE_4.v != null && ATTRIBUTE_4.v != '') {log.debug('ATTRIBUTE_4 '+ATTRIBUTE_4.v);foundOne = true;}
 
 			//If at least one was found
 			if(foundOne)
 			{			
 				//Definition of the client
-				var ClientString = '<M_Clients><sCoreId>$CORE_ID</sCoreId><sFullname>$CLIENT_NAME</sFullname><sEmail>$EMAIL</sEmail><sCNP>$CNP</sCNP><kpTypeofClient><sCode>C</sCode></kpTypeofClient><kpBranch><sCode>$Opu</sCode></kpBranch><kpStatus><sCode>$STATUS</sCode></kpStatus></M_Clients>';
+				var ClientString = '<M_Clients><sATTRIBUTE_3>$ATTRIBUTE_3</ATTRIBUTE_3><kpTypeofClient><sCode>C</sCode></kpTypeofClient><sATTRIBUTE_2><scode>$ATTRIBUTE_2</scode></sATTRIBUTE_2><ATTRIBUTE_1><sCode>$ATTRIBUTE_1</sCode></ATTRIBUTE_1></M_Clients>';
 				
 				//Replace the different variables of the xml with the read values
-				ClientString = ClientString.replace('$CORE_ID', CORE_ID.v);
-				ClientString = ClientString.replace('$CLIENT_NAME', CLIENT_NAME.v);
-				ClientString = ClientString.replace('$EMAIL', EMAIL.v);
-				ClientString = ClientString.replace('$CNP', CNP.v);
-				ClientString = ClientString.replace('$Opu', Opu.v);
-				ClientString = ClientString.replace('$STATUS', (STATUS.v == 'ACTIVE')?'AC':(STATUS.v == 'DISABLED')?'CL':'BL');
+				ClientString = ClientString.replace('$ATTRIBUTE_3', ATTRIBUTE_3.v);
+				ClientString = ClientString.replace('$ATTRIBUTE_2', ATTRIBUTE_2.v);
+				ClientString = ClientString.replace('$ATTRIBUTE_1', ATTRIBUTE_1.v);
 				
 				//If the client consents a case will be created at the same time that the client
-				if(CONSENT_VALUE != undefined && CONSENT_VALUE.v != null && CONSENT_VALUE.v != '' && CONSENT_VALUE.v == 'Y')
+				if(ATTRIBUTE_4 != undefined && ATTRIBUTE_4.v != null && ATTRIBUTE_4.v != '' && ATTRIBUTE_4.v == 'Y')
 				{
 					//Formats the Consent and the consent end date
 					log.info('Case is going to be created');
-					var ConsentYear = CONSENT_DATE.v.substring(0,4);
-					var ConsentMonth = CONSENT_DATE.v.substring(4,6);
-					var ConsentDay = CONSENT_DATE.v.substring(6,8);
-					
-					var ConsentEndYear = CONSENT_END_DATE.v.substring(0,4);
-					var ConsentEndMonth = CONSENT_END_DATE.v.substring(4,6);
-					var ConsentEndDay = CONSENT_END_DATE.v.substring(6,8);
 					
 					//Definition of the string for the case creation
-					var CaseCreationString = '<BizAgiWSParam><domain>domain</domain><userName>WebService</userName> <Cases><Case><Process>UpdateClientsConsents</Process><Entities><M_UCP_UpdateConsentReq><dConsentDate>$EndConsentDate</dConsentDate><dConsentEndDate>$ConsentDate</dConsentEndDate><XIncomingClients>$CLIENTSTRING</XIncomingClients><kpIncomingChannel><sCode>C_DB</sCode></kpIncomingChannel>$CONSENT</M_UCP_UpdateConsentReq></Entities></Case></Cases></BizAgiWSParam>';
+					var CaseCreationString = '<BizAgiWSParam><domain>domain</domain><userName>WebService</userName> <Cases><Case><Process>$PROCESS_NAME</Process><Entities><PROCESS_ENTITY><XIncomingClients>$CLIENTSTRING</XIncomingClients></PROCESS_ENTITY></Entities></Case></Cases></BizAgiWSParam>';
 					CaseCreationString = CaseCreationString.replace('$ConsentDate', ConsentYear+'-'+ConsentMonth+'-'+ConsentDay+'T00:00:00.000');
-					CaseCreationString = CaseCreationString.replace('$EndConsentDate', ConsentEndYear+'-'+ConsentEndMonth+'-'+ConsentEndDay+'T00:00:00.000');
-					CaseCreationString = CaseCreationString.replace('$CONSENT', '<xConsentsModification><M_ConsentStatus><bNewValue>True</bNewValue><pConsentType><sCode>M</sCode></pConsentType></M_ConsentStatus></xConsentsModification>');
 					CaseCreationString = CaseCreationString.replace('$CLIENTSTRING',ClientString);
 					
 					var args = {casesInfo: CaseCreationString};
