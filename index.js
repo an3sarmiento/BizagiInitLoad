@@ -10,6 +10,8 @@ var math = require('mathjs');
 //Loging library
 var Log = require('log');
 
+const utf8 = require('utf8');
+
 //Definition of the logging file
 var TimeInMills = new Date().getTime();
 var log = new Log('debug', fs.createWriteStream('logs/'+TimeInMills+'.log'));
@@ -30,7 +32,7 @@ else
 {    
 	log.debug("Worksheet Exists");
     var InitialRow = 2; //First row to be read from the file
-	var	FinalRow = 200; //Last row to be read from the file
+	var	FinalRow = 2; //Last row to be read from the file
     var isEmpty = false;
 	
 	//Variabled for final loging purposes
@@ -97,6 +99,8 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 			CNP = worksheet['C' + InitRow];
 			CORE_ID = worksheet['D' + InitRow];
 			CLIENT_NAME = worksheet['E' + InitRow];
+			console.log('Client Name: ' + CLIENT_NAME.v);
+			console.log('Client Name: ' + utf8.encode(CLIENT_NAME.v));
 			EMAIL = worksheet['F' + InitRow];
 			CLIENT_TYPE = worksheet['G' + InitRow];
 			CONSENT_TYPE = worksheet['H' + InitRow];
@@ -131,7 +135,7 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 				
 				//Replace the different variables of the xml with the read values
 				ClientString = ClientString.replace('$CORE_ID', CORE_ID.v);
-				ClientString = ClientString.replace('$CLIENT_NAME', CLIENT_NAME.v);
+				ClientString = ClientString.replace('$CLIENT_NAME', utf8.encode(CLIENT_NAME.v));
 				ClientString = ClientString.replace('$EMAIL', EMAIL.v);
 				ClientString = ClientString.replace('$CNP', CNP.v);
 				ClientString = ClientString.replace('$Opu', Opu.v);
