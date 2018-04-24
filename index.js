@@ -99,8 +99,6 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 			CNP = worksheet['C' + InitRow];
 			CORE_ID = worksheet['D' + InitRow];
 			CLIENT_NAME = worksheet['E' + InitRow];
-			console.log('Client Name: ' + CLIENT_NAME.v);
-			console.log('Client Name: ' + utf8.encode(CLIENT_NAME.v));
 			EMAIL = worksheet['F' + InitRow];
 			CLIENT_TYPE = worksheet['G' + InitRow];
 			CONSENT_TYPE = worksheet['H' + InitRow];
@@ -136,7 +134,7 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 				//Replace the different variables of the xml with the read values
 				ClientString = ClientString.replace('$CORE_ID', CORE_ID.v);
 				ClientString = ClientString.replace('$CLIENT_NAME', utf8.encode(CLIENT_NAME.v));
-				ClientString = ClientString.replace('$EMAIL', EMAIL.v);
+				ClientString = ClientString.replace('$EMAIL', utf8.encode(EMAIL.v));
 				ClientString = ClientString.replace('$CNP', CNP.v);
 				ClientString = ClientString.replace('$Opu', Opu.v);
 				ClientString = ClientString.replace('$STATUS', (STATUS.v == 'ACTIVE')?'AC':(STATUS.v == 'DISABLED')?'CL':'BL');

@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "devDependencies": {
+    "utf8": "3.0.0",
+    "log": "1.4.0",
+    "mathjs": "4.1.2",
+    "fs": "0.0.1-security",
+    "xlsx": "0.12.10"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
