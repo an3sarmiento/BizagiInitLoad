@@ -8,201 +8,329 @@ var   fs = require('fs');
 var math = require('mathjs');
 
 //Loging library
-var Log = require('log');
+var LogF = require('log');
 
-//Definition of the logging file
-var TimeInMills = new Date().getTime();
-var log = new Log('debug', fs.createWriteStream('logs/'+TimeInMills+'.log'));
+//Definition of the service points
+var SoapServer = require('soap');
 
-log.debug("**********************	 	START		****************");
+//Cycle related variables
+var jumpSize, basicTime,cyclesSinceLastStop, files, jumpsFile, ErrorJson = [], WaitingTime;
 
-//Location of the Excel File and Workbook
-var wb = XLSX.readFileSync("BookSmall.xlsx");
-//var wb = XLSX.readFileSync("Book1.xlsx");
-var MyWorksheet = wb.Sheets["Sheet1"];
+//Variabled for final loging purposes
+var NumberExpected, NumberOfClients, NumberOfCases, NumberOfErrorClients, NumberOfErrorCases, RequestedClients, RequestedCases, AppError, TimeInMills;
+	
+var RemainingClients = 0;
+var RemainingCases = 0;
+var maxClients = 400;
+var minTime = 10;
+var minTH = 180;
+var maxTH = 220;
+		
+var SERVER_NAME = 'localhost';
+var APPLICATION_NAME = 'ProjectName';
+var urlWE = 'http://' + SERVER_NAME + '/' + APPLICATION_NAME + '/WebServices/WorkflowEngineSOA.asmx?wsdl';
+var urlEM = 'http://' + SERVER_NAME + '/' + APPLICATION_NAME + '/WebServices/EntityManagerSOA.asmx?wsdl';
 
-//If Sheet is not found in the workbook
-if(MyWorksheet == undefined)
+var ExcelsToRead = {excels:[
+	{name:"RECONCILIATION FILE1.xlsx",sheet:"SHEET1",init:0,fin:72769}
+]};
+var ExcelPos = 0;
+NextExcel();
+
+function NextExcel()
 {
-	log.debug("No Sheet found");
+	if(ExcelsToRead.excels.length > ExcelPos)
+	{	
+		var MyExcel = ExcelsToRead.excels[ExcelPos]
+		ReadExcel(MyExcel.name,MyExcel.sheet, MyExcel.init, MyExcel.fin,ExecuteError);
+	}
+	ExcelPos++;
 }
-else
-{    
-	log.debug("Worksheet Exists");
-    var InitialRow = 2; //First row to be read from the file
-	var	FinalRow = 200; //Last row to be read from the file
-    var isEmpty = false;
+
+
+function ReadExcel(FileName, SheetName, HeaderRow, FinalRow, callback)
+{
 	
-	//Variabled for final loging purposes
-	var NumberExpected = FinalRow - InitialRow + 1; //The number of rows that should be properly executed
-	var NumberOfClients = 0; //Number of clients created
-	var NumberOfCases = 0; //Number of cases created
-	var RequestedClients = 0; //Number of clients requested to Bizagi
-	var RequestedCases = 0; //Number of cases requested to Bizagi
+	//Definition of the logging file
+	TimeInMills = new Date().getTime();
 	
-	//Iteratively reading of the file to not make a DoS of the webservices
-	CycleMethod(InitialRow, FinalRow, MyWorksheet, function(err, result){});
+	Logs = {
+		logFDebug : new LogF('debug', fs.createWriteStream('logs/'+SERVER_NAME+'/'+TimeInMills+'-debug.log')),
+		logFInfo : new LogF('info', fs.createWriteStream('logs/'+SERVER_NAME+'/'+TimeInMills+'-info.log')),
+		logFError : new LogF('error', fs.createWriteStream('logs/'+SERVER_NAME+'/'+TimeInMills+'-error.log'))
+	};
+
+	jumpSize = 5;
+	basicTime = 100;
+	cyclesSinceLastStop = 0;
+	files = 1;
+	jumpsFile = 0;
+	AppError = false;
 	
-	log.debug('Finished all the rows');
+	ErrorJson = [];
+	Log(Logs,'info',"***********	 	START	" + FileName  + "	**********");
+	
+	//Location of the Excel File and Workbook
+	var wb = XLSX.readFileSync(FileName);
+	var MyWorksheet = wb.Sheets[SheetName];
+		
+	//If Sheet is not found in the workbook
+	if(MyWorksheet == undefined)
+	{
+		Log(Logs,'info',"No Sheet found");
+	}
+	else
+	{    
+		Log(Logs,'debug',"Worksheet Exists");
+		
+		//Variabled for final loging purposes
+		NumberExpected = FinalRow - HeaderRow; //The number of rows that should be properly executed
+		NumberOfClients = 0; //Number of clients created
+		NumberOfCases = 0; //Number of cases created
+		NumberOfErrorClients = 0; //Number of clients created
+		NumberOfErrorCases = 0; //Number of cases created
+		RequestedClients = 0; //Number of clients requested to Bizagi
+		RequestedCases = 0; //Number of cases requested to Bizagi
+		RemainingClients = 0;
+		RemainingCases = 0;
+
+		//Iteratively reading of the file to not make a DoS of the webservices
+		CycleMethod(Logs, HeaderRow + 1, FinalRow, MyWorksheet, callback);
+	}
 }
-log.info("**********************	 	END		****************");
-	
 /*
 *	Itearatively calls itsealf to read the next chunk of the file with a delay to avoid saturating the web services
 *	InitialRow: First row that should be read in this cycle
 *	FinalRow: Final row that should be read in this cycle
 *	MyWorksheet: Excel file to read
 */
-function CycleMethod(InitialRow, FinalRow, MyWorksheet, callback) {
+//function CycleMethod(InitialRow, FinalRow, MyWorksheet, clientEM, clientWE, callback) {
+function CycleMethod(LogsFiles, InitialRow, FinalRow, MyWorksheet, callback) {
+	
+	var NewRemainingClients = RequestedClients - NumberOfClients - NumberOfErrorClients;
+	var NewRemainingCases = RequestedCases - NumberOfCases - NumberOfErrorCases;
+	
+	var Grew = math.max(math.min(NewRemainingClients - RemainingClients,10),-10)/5;	
+	
+	RemainingClients = NewRemainingClients;
+	RemainingCases = NewRemainingCases;
+	
 	//Last cell of the chunk
-	var FinalRowPerCycle = math.min(InitialRow + 50,FinalRow);
+	var FinalRowPerCycle = math.min(InitialRow + jumpSize - 1,FinalRow);
+	
+	if(jumpsFile > 1000)
+	{
+		LogsFiles.logFDebug = new LogF('debug', fs.createWriteStream('logs/'+SERVER_NAME+'/'+TimeInMills+'-debug (' + files + ').log'));
+		jumpsFile = 0;
+		files++;
+	}
+	jumpsFile ++
 	
 	//Chunk processing
-	ManySOAPCalls(InitialRow, FinalRowPerCycle, MyWorksheet, function(err, result){});
+	ManySOAPCalls(LogsFiles, InitialRow, FinalRowPerCycle, MyWorksheet, callback);
+	//ManySOAPCalls(InitialRow, FinalRowPerCycle, MyWorksheet, clientEM, clientWE, callback);
 	
 	//Updates initial row for next chunk
-	InitialRow = FinalRowPerCycle + 1;
+	InitialRow = FinalRowPerCycle;
+	
+	WaitingTime = basicTime;
+	cyclesSinceLastStop ++;
+	if(AppError)
+	{
+		AppError = false;
+		WaitingTime = 60000;
+		Log(LogsFiles, 'error',"\nStop app error");
+		cyclesSinceLastStop = 0;
+	}
+	else if(RemainingCases > 400 || RemainingClients > maxClients)
+	{
+		basicTime += 100;
+		if(cyclesSinceLastStop < 50)
+			basicTime += 100;
+		Log(LogsFiles, 'info',"\nStop for big number of cases");
+		Log(LogsFiles, 'info',"Cycles Since Last Stop: " + cyclesSinceLastStop + "\n");
+		WaitingTime = 20000;
+		cyclesSinceLastStop = 0;
+	}
+	else if(Grew <= 0 && RemainingClients < minTH && cyclesSinceLastStop > 20)
+	{
+		basicTime -= (minTH/(minTH-RemainingClients))^(1+Grew);
+	}
+	else if(Grew >= 0 && RemainingClients > maxTH)
+	{
+		basicTime += (((maxClients-maxTH)/(maxClients-RemainingClients))^(1+Grew));
+	}
+	basicTime = math.max(minTime,parseInt(basicTime));
 	
 	//Verify if this should be the last chunk
-	if (InitialRow <= FinalRow)
+	if (InitialRow < FinalRow)
 	{	
 		//After waiting some time the next chunk will be read
-		setTimeout(CycleMethod, 1500, InitialRow, FinalRow, MyWorksheet, function(err, result){});
+		//setTimeout(CycleMethod, WaitingTime, InitialRow + 1 , FinalRow, MyWorksheet, clientEM, clientWE, function(err, result){});
+		setTimeout(CycleMethod, WaitingTime, LogsFiles, InitialRow + 1 , FinalRow, MyWorksheet, function(err, result){});
+	}
+	else
+	{
+		setTimeout(NextExcel, 10000);
 	}
 }
 	
-function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
+//function ManySOAPCalls(InitRow, FinRow, worksheet, clientEM, clientWE, callback) {
+function ManySOAPCalls(LogsFiles, InitRow, FinRow, worksheet, callback) {
 	
-	//Definition of the service points
-	var soap = require('soap');
-	var ServerName = '10.10.10.10';
-	var ProjectName = 'PROJECT_NAME';
-	var urlWE = 'http://' + ServerName + '/' + ProjectName + '/WebServices/WorkflowEngineSOA.asmx?wsdl';
-	var urlEM = 'http://' + ServerName + '/' + ProjectName + '/WebServices/EntityManagerSOA.asmx?wsdl';
-	
-	//variable to identify of the current chunk should be ended because a empty row was found
-	var empty = false;
-	log.info('New cycle( ' + InitRow + ' - ' + FinRow + ')');
-	console.log('New cycle( ' + InitRow + ' - ' + FinRow + ')');
-	
-	//Creating of the clients from the service points
-	soap.createClientAsync(urlWE).then((clientWE)=>
-	{	
-	soap.createClientAsync(urlEM).then((clientEM)=>
-	{	
+		
+	SoapServer.createClientAsync(urlEM).then((clientEM)=>
+	{
+		SoapServer.createClientAsync(urlWE).then((clientWE)=>
+		{
+				
+		//variable to identify of the current chunk should be ended because a empty row was found
+		var empty = false;
+		Log(LogsFiles, 'info','New cycle( ' + InitRow + ' - ' + FinRow + ')\t\tWaiting clients: ' + (RequestedClients - NumberOfClients - NumberOfErrorClients) + ', basicTime ' + basicTime );
+				
 		//Cycle to read each of the cells to read
 		while(!empty && InitRow <= FinRow) //  && InitRow < 1023
 		{		
 			//Definition of a variable per each column of the sheet
-			ATTRIBUTE_1 = worksheet['A' + InitRow];
-			ATTRIBUTE_2 = worksheet['B' + InitRow];
-			ATTRIBUTE_3 = worksheet['C' + InitRow];
-			ATTRIBUTE_4 = worksheet['I' + InitRow];
+			STATUS = worksheet['A' + InitRow];
+			Opu = worksheet['B' + InitRow];
+			CNP = worksheet['C' + InitRow];
+			CORE_ID = worksheet['D' + InitRow];
+			CLIENT_NAME = worksheet['E' + InitRow];
+			EMAIL = worksheet['F' + InitRow];
+			CLIENT_TYPE = worksheet['G' + InitRow];
+			CONSENT_TYPE = worksheet['H' + InitRow];
+			CONSENT_VALUE = worksheet['I' + InitRow];
+			CONSENT_DATE = worksheet['J' + InitRow];
+			CONSENT_END_DATE = worksheet['K' + InitRow];
+			CHANNEL = worksheet['L' + InitRow];
 			
 			//Variable to read if at least one of the cells of the sheet had a variable
 			var foundOne = false;
-			log.info('Reading Row: '+InitRow);
+			Log(LogsFiles, 'debug','Reading Row: '+InitRow);
 			
 			//For each of the variable we need to verify if at least one has value
-			if(ATTRIBUTE_1 != undefined && ATTRIBUTE_1.v != null && ATTRIBUTE_1.v != '') {log.debug('ATTRIBUTE_1 '+ATTRIBUTE_1.v);foundOne = true;}
-			if(ATTRIBUTE_2 != undefined && ATTRIBUTE_2.v != null && ATTRIBUTE_2.v != '') {log.debug('ATTRIBUTE_2 '+ATTRIBUTE_2.v);foundOne = true;}
-			if(ATTRIBUTE_3 != undefined && ATTRIBUTE_3.v != null && ATTRIBUTE_3.v != '') {log.debug('ATTRIBUTE_3 '+ATTRIBUTE_3.v);foundOne = true;}
-			if(ATTRIBUTE_4 != undefined && ATTRIBUTE_4.v != null && ATTRIBUTE_4.v != '') {log.debug('ATTRIBUTE_4 '+ATTRIBUTE_4.v);foundOne = true;}
+			if(STATUS != undefined && STATUS.v != null && STATUS.v != '') {Log(LogsFiles, 'debug','STATUS '+STATUS.v);foundOne = true;}
+			if(Opu != undefined && Opu.v != null && Opu.v != '') {Log(LogsFiles, 'debug','Opu '+Opu.v);foundOne = true;}
+			if(CNP != undefined && CNP.v != null && CNP.v != '') {Log(LogsFiles, 'debug','CNP '+CNP.v);foundOne = true;}
+			if(CORE_ID != undefined && CORE_ID.v != null && CORE_ID.v != '') {Log(LogsFiles, 'debug','CORE_ID '+CORE_ID.v);foundOne = true;}
+			if(CLIENT_NAME != undefined && CLIENT_NAME.v != null && CLIENT_NAME.v != '') {Log(LogsFiles, 'debug','CLIENT_NAME '+CLIENT_NAME.v);foundOne = true;}
+			if(EMAIL != undefined && EMAIL.v != null && EMAIL.v != '') {Log(LogsFiles, 'debug','EMAIL '+EMAIL.v);foundOne = true;}
+			if(CLIENT_TYPE != undefined && CLIENT_TYPE.v != null && CLIENT_TYPE.v != '') {Log(LogsFiles, 'debug','CLIENT_TYPE '+CLIENT_TYPE.v);foundOne = true;}
+			if(CONSENT_TYPE != undefined && CONSENT_TYPE.v != null && CONSENT_TYPE.v != '') {Log(LogsFiles, 'debug','CONSENT_TYPE '+CONSENT_TYPE.v);foundOne = true;}
+			if(CONSENT_VALUE != undefined && CONSENT_VALUE.v != null && CONSENT_VALUE.v != '') {Log(LogsFiles, 'debug','CONSENT_VALUE '+CONSENT_VALUE.v);foundOne = true;}
+			if(CONSENT_DATE != undefined && CONSENT_DATE.v != null && CONSENT_DATE.v != '') {Log(LogsFiles, 'debug','CONSENT_DATE '+CONSENT_DATE.v);foundOne = true;}
+			if(CONSENT_END_DATE != undefined && CONSENT_END_DATE.v != null && CONSENT_END_DATE.v != '') {Log(LogsFiles, 'debug','CONSENT_END_DATE '+CONSENT_END_DATE.v);foundOne = true;}
+			if(CHANNEL != undefined && CHANNEL.v != null && CHANNEL.v != '') {Log(LogsFiles, 'debug','CHANNEL '+CHANNEL.v);foundOne = true;}
 
 			//If at least one was found
 			if(foundOne)
 			{			
 				//Definition of the client
-				var ClientString = '<M_Clients><sATTRIBUTE_3>$ATTRIBUTE_3</ATTRIBUTE_3><kpTypeofClient><sCode>C</sCode></kpTypeofClient><sATTRIBUTE_2><scode>$ATTRIBUTE_2</scode></sATTRIBUTE_2><ATTRIBUTE_1><sCode>$ATTRIBUTE_1</sCode></ATTRIBUTE_1></M_Clients>';
+				var ClientString = '<sCoreId>$CORE_ID</sCoreId><sFullname>$CLIENT_NAME</sFullname><sEmail>$EMAIL</sEmail><sCNP>$CNP</sCNP>$Type$Opu<kpStatus><sCode>$STATUS</sCode></kpStatus>';
 				
 				//Replace the different variables of the xml with the read values
-				ClientString = ClientString.replace('$ATTRIBUTE_3', ATTRIBUTE_3.v);
-				ClientString = ClientString.replace('$ATTRIBUTE_2', ATTRIBUTE_2.v);
-				ClientString = ClientString.replace('$ATTRIBUTE_1', ATTRIBUTE_1.v);
+				ClientString = ClientString.replace('$CORE_ID', CORE_ID.v);
+				var CN = (CLIENT_NAME != undefined && CLIENT_NAME.v != null && CLIENT_NAME.v != '')?CLIENT_NAME.v:"";
+				var CE = (EMAIL != undefined && EMAIL.v != null && EMAIL.v != '')?EMAIL.v:"";
+				var BR = (Opu != undefined && Opu.v != null && Opu.v != '')?'<kpBranch><sCode>' + Opu.v + '</sCode></kpBranch>':'';
+				ClientString = ClientString.replace('$CLIENT_NAME', CleanText(CN));
+				//ClientString = ClientString.replace('$EMAIL', EMAIL.v);
+				ClientString = ClientString.replace('$EMAIL', CleanText(CE));
+				ClientString = ClientString.replace('$CNP', CNP.v);
+				ClientString = ClientString.replace('$Opu', BR);
+				//ClientString = ClientString.replace('$Type', '<kpTypeofClient><sCode>C</sCode></kpTypeofClient>');
+				ClientString = ClientString.replace('$Type', '');
+				ClientString = ClientString.replace('$STATUS', (STATUS == undefined || STATUS.v == null || STATUS.v == '' || STATUS.v == 'ACTIVE')?'AC':(STATUS.v == 'B')?'BL':'CL');
+				
+				var XMLCoding = '<?xml version="1.0" encoding="ISO-8859-1"?>';
 				
 				//If the client consents a case will be created at the same time that the client
-				if(ATTRIBUTE_4 != undefined && ATTRIBUTE_4.v != null && ATTRIBUTE_4.v != '' && ATTRIBUTE_4.v == 'Y')
+				if(CONSENT_VALUE != undefined && CONSENT_VALUE.v != null && CONSENT_VALUE.v != '' && (CONSENT_VALUE.v == 'Y' || CONSENT_VALUE.v == 'N'))
 				{
+					
 					//Formats the Consent and the consent end date
-					log.info('Case is going to be created');
+					Log(LogsFiles, 'debug','Case is going to be created');
+					var CONSENT_DATE_STRING = '' + CONSENT_DATE.v;
+					var ConsentYear = CONSENT_DATE_STRING.substring(0,4);
+					var ConsentMonth = CONSENT_DATE_STRING.substring(4,6);
+					var ConsentDay = CONSENT_DATE_STRING.substring(6,8);
+					
+					var CONSENT_DATE_STRING = '' + CONSENT_END_DATE.v;
+					var ConsentEndYear = CONSENT_DATE_STRING.substring(0,4);
+					var ConsentEndMonth = CONSENT_DATE_STRING.substring(4,6);
+					var ConsentEndDay = CONSENT_DATE_STRING.substring(6,8);
 					
 					//Definition of the string for the case creation
-					var CaseCreationString = '<BizAgiWSParam><domain>domain</domain><userName>WebService</userName> <Cases><Case><Process>$PROCESS_NAME</Process><Entities><PROCESS_ENTITY><XIncomingClients>$CLIENTSTRING</XIncomingClients></PROCESS_ENTITY></Entities></Case></Cases></BizAgiWSParam>';
+					var CaseCreationString = '<![CDATA[$XMLCoding<BizAgiWSParam><domain>domain</domain><userName>WebService</userName> <Cases><Case><Process>UpdateClientsConsents</Process><Entities><M_UCP_UpdateConsentReq><dConsentDate>$ConsentDate</dConsentDate><dConsentEndDate>$EndConsentDate</dConsentEndDate><kmClient>$CLIENTSTRING</kmClient><kpIncomingChannel><sCode>C_DB</sCode></kpIncomingChannel><xConsentsModification><M_ConsentStatus><bNewValue>$CONSENT_VALUE</bNewValue><pConsentType><sCode>M</sCode></pConsentType></M_ConsentStatus></xConsentsModification></M_UCP_UpdateConsentReq></Entities></Case></Cases></BizAgiWSParam>]]>';
 					CaseCreationString = CaseCreationString.replace('$ConsentDate', ConsentYear+'-'+ConsentMonth+'-'+ConsentDay+'T00:00:00.000');
+					CaseCreationString = CaseCreationString.replace('$EndConsentDate', ConsentEndYear+'-'+ConsentEndMonth+'-'+ConsentEndDay+'T00:00:00.000');
+					CaseCreationString = CaseCreationString.replace('$CONSENT_VALUE', (CONSENT_VALUE.v=='Y')?'True':'False');
 					CaseCreationString = CaseCreationString.replace('$CLIENTSTRING',ClientString);
+					CaseCreationString = CaseCreationString.replace('$XMLCoding',XMLCoding);
 					
 					var args = {casesInfo: CaseCreationString};
-					log.debug('Arguments generated');
-					log.debug(JSON.stringify(args));
 
-					//Call the create cases web service with the previously generated string
-					clientWE.createCasesAsString(args, function(err, result) {
-						if(err){
-							log.error('Error');
-							log.error(err);
-							console.log('Error');
-							console.log(err);
-						}
-						if(!result) {
-
-							log.error('Not Working');
-							return null;
-						}
-						log.debug(result);
-						//Increase the counters for clients and cases generated
-						NumberOfClients ++;
-						NumberOfCases ++;
-						if(NumberOfClients == NumberExpected)
-						{
-							log.info('Created Clients: ' + NumberOfClients);
-							log.info('Created Cases: ' + NumberOfCases);
-							console.log('Created Cases: ' + NumberOfCases);
-							console.log('Created Clients: ' + NumberOfClients);
-						}
-						return(result);
-					});
+					var properties = {
+							'ClientArguments':args,
+							'isCase': true,
+							'RowNumber': InitRow,
+							'retry': 0,
+							'client': clientWE,
+							'callback': callback,
+							'LogsFiles' : LogsFiles
+					}
+					//Call the create cases web service with the previously generated string				
+					OneSOAPCall(properties);
 					
 					//Increase the requested counters
 					RequestedClients++;
 					RequestedCases++;
-					log.debug('Requested Clients: ' + RequestedClients + 'Requested Cases: ' + RequestedCases );
+					Log(LogsFiles, 'debug','Requested Clients: ' + RequestedClients + '\tRequested Cases: ' + RequestedCases );
+					
 					
 				}
 				else
 				{
-					log.info('Entity is going to be created');
-					var args = {entityInfo: '<BizAgiWSParam><Entities>' + ClientString + '</Entities></BizAgiWSParam>'};
-					log.debug('Arguments generated');
-					log.debug(JSON.stringify(args));
-
+					//Formats the Consent and the consent end date
+					Log(LogsFiles, 'debug','Case is going to be created');
+					var CONSENT_DATE_STRING = '' + CONSENT_DATE.v;
+					var ConsentYear = CONSENT_DATE_STRING.substring(0,4);
+					var ConsentMonth = CONSENT_DATE_STRING.substring(4,6);
+					var ConsentDay = CONSENT_DATE_STRING.substring(6,8);
 					
-					clientEM.saveEntityAsString(args, function(err, result) {
-						if(err){
-							log.error('Error');
-							log.error(err);
-							console.log('Error');
-							console.log(err);
-						}
-						if(!result) {
+					var CONSENT_DATE_STRING = '' + CONSENT_END_DATE.v;
+					var ConsentEndYear = CONSENT_DATE_STRING.substring(0,4);
+					var ConsentEndMonth = CONSENT_DATE_STRING.substring(4,6);
+					var ConsentEndDay = CONSENT_DATE_STRING.substring(6,8);
+					
+					//Definition of the string for the case creation
+					var CaseCreationString = '<![CDATA[$XMLCoding<BizAgiWSParam><domain>domain</domain><userName>WebService</userName> <Cases><Case><Process>UpdateClientsConsents</Process><Entities><M_UCP_UpdateConsentReq><dConsentDate>$ConsentDate</dConsentDate><dConsentEndDate>$EndConsentDate</dConsentEndDate><kmClient>$CLIENTSTRING</kmClient><kpIncomingChannel><sCode>C_DB</sCode></kpIncomingChannel><xConsentsModification><M_ConsentStatus><bNewValue>$CONSENT_VALUE</bNewValue><pConsentType><sCode>M</sCode></pConsentType></M_ConsentStatus></xConsentsModification></M_UCP_UpdateConsentReq></Entities></Case></Cases></BizAgiWSParam>]]>';
+					CaseCreationString = CaseCreationString.replace('$ConsentDate', ConsentYear+'-'+ConsentMonth+'-'+ConsentDay+'T00:00:00.000');
+					CaseCreationString = CaseCreationString.replace('$EndConsentDate', ConsentEndYear+'-'+ConsentEndMonth+'-'+ConsentEndDay+'T00:00:00.000');
+					CaseCreationString = CaseCreationString.replace('$CONSENT_VALUE', '');
+					CaseCreationString = CaseCreationString.replace('$CLIENTSTRING',ClientString);
+					CaseCreationString = CaseCreationString.replace('$XMLCoding',XMLCoding);
+					
+					var args = {casesInfo: CaseCreationString};
 
-							log.error('Not Working');
-							return null;
-						}
-						log.debug(result);
-						//Increase the counters for clients  generated
-						NumberOfClients ++;
-						if(NumberOfClients == NumberExpected)
-						{
-							log.info('Created Clients: ' + NumberOfClients);
-							log.info('Created Cases: ' + NumberOfCases);
-							console.log('Created Cases: ' + NumberOfCases);
-							console.log('Created Clients: ' + NumberOfClients);
-						}
-						return(result);
-					});
-					//Quest a new client
+					var properties = {
+							'ClientArguments':args,
+							'isCase': true,
+							'RowNumber': InitRow,
+							'retry': 0,
+							'client': clientWE,
+							'callback': callback,
+							'LogsFiles' : LogsFiles
+					}
+					//Call the create cases web service with the previously generated string				
+					OneSOAPCall(properties);
+					
+					//Increase the requested counters
 					RequestedClients++;
-					log.debug('Requested Clients: ' + RequestedClients );
+					RequestedCases++;
+					Log(LogsFiles, 'debug','Requested Clients: ' + RequestedClients + '\tRequested Cases: ' + RequestedCases );
+					
 				}
 				
 				InitRow++;
@@ -210,8 +338,151 @@ function ManySOAPCalls(InitRow, FinRow, worksheet, callback) {
 			else
 				empty = true;
 		}
-	});
-	});
-	log.info('Ended cycle');
-	callback(null,!empty);
+	});});
+	Log(LogsFiles, 'debug','Ended cycle');
 };
+
+function OneSOAPCall(properties) {
+	var ClientArguments = properties.ClientArguments;
+	var isCase = properties.isCase;
+	var client = properties.client;
+	var LogsFiles = properties.LogsFiles;
+	
+	Log(LogsFiles, 'debug',(isCase?'Case':'Entity') + ' is going to be created');
+	Log(LogsFiles, 'debug','Arguments generated: ' + JSON.stringify(ClientArguments));
+	
+	if(isCase)
+	{
+	//var client = clientWE;
+		client.createCasesAsString(ClientArguments, function(err,result){GetClientResponse(LogsFiles, err, result,properties)});
+	}
+	else
+	{
+	//var client = clientEM;
+		client.saveEntityAsString(ClientArguments, function(err,result){GetClientResponse(LogsFiles, err, result,properties)});
+	}
+};
+
+function CleanText(TextVar)
+{
+	TextVar += "";
+	TextVar = TextVar.replace(/&/g,'&amp;');
+	TextVar = TextVar.replace(/</g,'&lt;');
+	TextVar = TextVar.replace(/>/g,'&gt;');
+	//console.log(TextVar);
+	return TextVar;
+}
+
+function GetClientResponse(LogsFiles, err, result, properties)
+{
+	var ClientArguments = properties.ClientArguments;
+	var isCase = properties.isCase;
+	var RowNumber = properties.RowNumber;
+	var retry = properties.retry;
+	var client = properties.client;
+	var ReturnVar = null;
+	var callback = properties.callback;
+	if(err || !result ){
+		console.log(LogsFiles, 'Error');
+		console.log(LogsFiles, 'Retries: ' + retry);
+		AppError = true;
+		if(retry < 3)
+		{
+			Log(LogsFiles, 'error','Error');
+			Log(LogsFiles, 'error','Retries: ' + retry);
+			//Log('error',err);
+			properties.retry = retry+1;
+			setTimeout(OneSOAPCall, 60000, LogsFiles, properties, callback);
+		}
+		else
+		{
+			console.log(err);
+			NumberOfErrorClients ++;
+			if(isCase)
+				NumberOfErrorCases ++;
+			ErrorJson.push(RowNumber);
+		}
+	}
+	else
+	{
+		var regexMessage = /<ErrorMessage>(.*)<\/ErrorMessage>/g;
+		var regexDatabase = /Rollback not Allowed - Connection not found/g;
+		var regex = /<M_Clients>(.*)<\/M_Clients>/g;
+		if(isCase)
+			regex = /<processId>0<\/processId>/g;
+		var StringArguments = JSON.stringify(result);
+		var found = false;
+		var ErrorMessage = regexMessage.exec(StringArguments);
+		var Error = regex.exec(StringArguments);
+		var ErrorDatabas = regexDatabase.exec(StringArguments);
+		if ( ErrorMessage !== null || (!isCase && Error == null) || (isCase && Error !== null) ) 
+		{
+			if(ErrorDatabas !== null && retry < 3)
+			{
+				AppError = true;
+				Log(LogsFiles, 'error','Retry: ' + retry + ' -> ' + JSON.stringify(ClientArguments));
+				//Log('error',result);
+				properties.retry = retry+1;
+				setTimeout(OneSOAPCall, 60000, LogsFiles, properties, callback);
+			}
+			else
+			{
+				NumberOfErrorClients ++;
+				if(isCase)
+					NumberOfErrorCases ++;
+				ErrorJson.push(RowNumber);
+				Log(LogsFiles, 'error',JSON.stringify(ClientArguments));
+				Log(LogsFiles, 'error',result);
+			}
+		}
+		else
+		{				
+			Log(LogsFiles, 'debug',result);
+			Log(LogsFiles, 'debug',JSON.stringify(ClientArguments));
+			
+			//Increase the counters for clients generated
+			NumberOfClients ++;		
+			if(isCase)
+				NumberOfCases ++;	
+			Log(LogsFiles, 'debug','Current Created Clients: ' + NumberOfClients);
+			if(isCase)
+				Log(LogsFiles, 'debug','Current Created Cases: ' + NumberOfCases);
+			ReturnVar = result;
+		}	
+	}
+	
+	if(NumberOfClients + NumberOfErrorClients == NumberExpected)
+	{
+		callback(LogsFiles,ErrorJson);
+	}
+}
+
+function ExecuteError(LogsFiles, Error)
+{
+	Log(LogsFiles, 'info','Created Clients: ' + NumberOfClients);
+	Log(LogsFiles, 'info','Error Clients: ' + NumberOfErrorClients);
+	Log(LogsFiles, 'info','Created Cases: ' + NumberOfCases);
+	Log(LogsFiles, 'info',"Rows With Errors: " + JSON.stringify(ErrorJson));
+	Log(LogsFiles, 'info',"**********************	 	END		****************");
+}
+function Log(LogsFiles, level,message)
+{
+	switch(level) {
+    case 'debug':
+        LogsFiles.logFDebug.debug(message);
+        break;
+    case 'info':
+        LogsFiles.logFDebug.info(message);
+        LogsFiles.logFInfo.info(message);
+        console.log(message);
+        break;
+    case 'error':
+        LogsFiles.logFDebug.error(message);
+        LogsFiles.logFInfo.error(message);
+        LogsFiles.logFError.error(message);
+        console.log(message);
+        break;
+    default:
+        LogsFiles.logFDebug.debug(message);
+	}
+}
